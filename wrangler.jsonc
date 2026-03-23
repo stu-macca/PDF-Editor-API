@@ -1,0 +1,15 @@
+{
+	"name": "pdf-editor-api",
+	"main": "src/index.js",
+	"compatibility_date": "2026-03-20",
+	"workers_dev": true,
+	"routes": [
+		{
+			"pattern": "api.mcmillantendering.com.au",
+			"custom_domain": true,
+		},
+	],
+	"observability": {
+		"enabled": true,
+	},
+}
