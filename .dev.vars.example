@@ -1,0 +1,7 @@
+# Copy this file to .dev.vars for local Wrangler development.
+SUPABASE_URL="https://your-project-ref.supabase.co"
+SUPABASE_ANON_KEY="your-supabase-anon-key"
+SUPABASE_SECRET_KEY="your-supabase-service-role-key"
+LEMONSQUEEZY_WEBHOOK_SECRET="your-lemonsqueezy-webhook-signing-secret"
+PRODUCT_CONFIG_JSON='{"droptext-pdf":{"device_limit":2,"offline_grace_days":7},"submissions-pdf":{"device_limit":2,"offline_grace_days":7}}'
+LEMONSQUEEZY_VARIANT_PRODUCT_MAP='{"111":{"product_code":"droptext-pdf","plan":"basic"},"14411104":{"product_code":"submissions-pdf","plan":"basic"}}'
