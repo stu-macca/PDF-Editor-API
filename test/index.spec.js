@@ -79,17 +79,17 @@ const { createClientMock, getState, setState } = vi.hoisted(() => {
   });
 
   const selectBuilder = (table, state) => ({
-    eq: vi.fn(async (_column, value) => {
+    eq: vi.fn(async (column, value) => {
       if (table === 'licences') {
         return {
-          data: state.licences.filter((licence) => licence.user_id === value),
+          data: state.licences.filter((licence) => licence[column] === value),
           error: state.licenceError,
         };
       }
 
       if (table === 'devices') {
         return {
-          data: state.devices.filter((device) => device.user_id === value),
+          data: state.devices.filter((device) => device[column] === value),
           error: state.devicesError,
         };
       }
@@ -126,11 +126,15 @@ const { createClientMock, getState, setState } = vi.hoisted(() => {
         select: vi.fn(() => selectBuilder('licences', state)),
         update: vi.fn((payload) => ({
           eq: vi.fn(async (_column, id) => {
+            state.licences = state.licences.map((licence) =>
+              licence.id === id ? { ...licence, ...payload } : licence,
+            );
             state.licenceUpdates.push({ id, payload });
             return { data: null, error: state.licenceUpdateError };
           }),
         })),
         insert: vi.fn(async (payload) => {
+          state.licences.push(payload);
           state.licenceInserts.push(payload);
           return { data: null, error: state.licenceInsertError };
         }),
@@ -652,5 +656,148 @@ describe('licensing worker', () => {
         },
       },
     ]);
+  });
+
+  it('cancels a matching licence for a Lemon Squeezy refund webhook', async () => {
+    setState({
+      licences: [
+        {
+          id: 'lic-submissions-1',
+          user_id: 'user-123',
+          product_code: 'submissions-pdf',
+          plan: 'basic',
+          status: 'active',
+          expires_at: null,
+          created_at: '2026-03-01T00:00:00.000Z',
+          lemonsqueezy_order_id: 'order-refund-1',
+        },
+      ],
+    });
+
+    const payload = JSON.stringify({
+      meta: { event_name: 'order_refunded' },
+      data: {
+        id: 'order-refund-1',
+        attributes: {
+          status: 'refunded',
+        },
+      },
+    });
+    const signature = await signPayload('webhook-secret', payload);
+
+    const response = await worker.fetch(
+      new Request('http://example.com/lemonsqueezy/webhook', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-event-name': 'order_refunded',
+          'x-signature': signature,
+        },
+        body: payload,
+      }),
+      DEFAULT_ENV,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(getState().licenceUpdates).toEqual([
+      {
+        id: 'lic-submissions-1',
+        payload: {
+          status: 'cancelled',
+        },
+      },
+    ]);
+    expect(getState().licences[0].status).toBe('cancelled');
+  });
+
+  it('ignores a refund webhook when no order-linked licence exists', async () => {
+    setState({
+      licences: [
+        {
+          id: 'lic-submissions-legacy',
+          user_id: 'user-123',
+          product_code: 'submissions-pdf',
+          plan: 'basic',
+          status: 'active',
+          expires_at: null,
+          created_at: '2026-03-01T00:00:00.000Z',
+          lemonsqueezy_order_id: null,
+        },
+      ],
+    });
+
+    const payload = JSON.stringify({
+      meta: { event_name: 'order_refunded' },
+      data: {
+        id: 'order-refund-missing',
+        attributes: {
+          status: 'refunded',
+        },
+      },
+    });
+    const signature = await signPayload('webhook-secret', payload);
+
+    const response = await worker.fetch(
+      new Request('http://example.com/lemonsqueezy/webhook', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-event-name': 'order_refunded',
+          'x-signature': signature,
+        },
+        body: payload,
+      }),
+      DEFAULT_ENV,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, ignored: true });
+    expect(getState().licenceUpdates).toHaveLength(0);
+  });
+
+  it('treats repeated refund webhooks as idempotent when the licence is already cancelled', async () => {
+    setState({
+      licences: [
+        {
+          id: 'lic-submissions-cancelled',
+          user_id: 'user-123',
+          product_code: 'submissions-pdf',
+          plan: 'basic',
+          status: 'cancelled',
+          expires_at: null,
+          created_at: '2026-03-01T00:00:00.000Z',
+          lemonsqueezy_order_id: 'order-refund-2',
+        },
+      ],
+    });
+
+    const payload = JSON.stringify({
+      meta: { event_name: 'order_refunded' },
+      data: {
+        id: 'order-refund-2',
+        attributes: {
+          status: 'refunded',
+        },
+      },
+    });
+    const signature = await signPayload('webhook-secret', payload);
+
+    const response = await worker.fetch(
+      new Request('http://example.com/lemonsqueezy/webhook', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-event-name': 'order_refunded',
+          'x-signature': signature,
+        },
+        body: payload,
+      }),
+      DEFAULT_ENV,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(getState().licenceUpdates).toHaveLength(0);
   });
 });
